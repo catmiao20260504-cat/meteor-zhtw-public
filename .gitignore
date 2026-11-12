@@ -1,0 +1,4 @@
+meteor/
+*.ttf
+__pycache__/
+untranslated.json

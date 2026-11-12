@@ -1,0 +1,471 @@
+diff --git a/src/main/java/meteordevelopment/meteorclient/gui/GuiTheme.java b/src/main/java/meteordevelopment/meteorclient/gui/GuiTheme.java
+index 2eeeafb..ede86b6 100644
+--- a/src/main/java/meteordevelopment/meteorclient/gui/GuiTheme.java
++++ b/src/main/java/meteordevelopment/meteorclient/gui/GuiTheme.java
+@@ -322,2 +322,10 @@ public abstract class GuiTheme implements ISerializable<GuiTheme> {
+     public double textWidth(String text, int length, boolean title) {
++        if (meteordevelopment.meteorclient.utils.misc.Tr.enabled()) {
++            String tr = meteordevelopment.meteorclient.utils.misc.Tr.t(text);
++            if (tr != text) {
++                text = tr;
++                length = text.length();
++            }
++        }
++
+         return scale(textRenderer().getWidth(text, length, false) * (title ? TITLE_TEXT_SCALE : 1));
+diff --git a/src/main/java/meteordevelopment/meteorclient/gui/renderer/GuiRenderer.java b/src/main/java/meteordevelopment/meteorclient/gui/renderer/GuiRenderer.java
+index 760e827..7843251 100644
+--- a/src/main/java/meteordevelopment/meteorclient/gui/renderer/GuiRenderer.java
++++ b/src/main/java/meteordevelopment/meteorclient/gui/renderer/GuiRenderer.java
+@@ -257,3 +257,3 @@ public class GuiRenderer {
+     public void text(String text, double x, double y, Color color, boolean title) {
+-        texts.add(getOp(textPool, x, y, color).set(text, theme.textRenderer(), title));
++        texts.add(getOp(textPool, x, y, color).set(meteordevelopment.meteorclient.utils.misc.Tr.t(text), theme.textRenderer(), title));
+     }
+diff --git a/src/main/java/meteordevelopment/meteorclient/gui/widgets/WMultiLabel.java b/src/main/java/meteordevelopment/meteorclient/gui/widgets/WMultiLabel.java
+index a66d893..09c2caf 100644
+--- a/src/main/java/meteordevelopment/meteorclient/gui/widgets/WMultiLabel.java
++++ b/src/main/java/meteordevelopment/meteorclient/gui/widgets/WMultiLabel.java
+@@ -25,2 +25,8 @@ public abstract class WMultiLabel extends WLabel {
+ 
++        String shown = meteordevelopment.meteorclient.utils.misc.Tr.t(text);
++        if (meteordevelopment.meteorclient.utils.misc.Tr.hasCjk(shown)) {
++            calculateCjk(shown);
++            return;
++        }
++
+         String[] textLines = text.split("\n");
+@@ -84,2 +90,33 @@ public abstract class WMultiLabel extends WLabel {
+ 
++    private void calculateCjk(String shown) {
++        double maxLineWidth = 0;
++        double limit = this.maxWidth == 0 ? Double.MAX_VALUE : theme.scale(this.maxWidth);
++
++        for (String textLine : shown.split("\n")) {
++            StringBuilder sb = new StringBuilder();
++            double lineWidth = 0;
++
++            for (int i = 0; i < textLine.length(); i++) {
++                String ch = textLine.substring(i, i + 1);
++                double w = theme.textWidth(ch, 1, title);
++
++                if (lineWidth + w > limit && !sb.isEmpty()) {
++                    lines.add(sb.toString());
++                    maxLineWidth = Math.max(maxLineWidth, lineWidth);
++                    sb.setLength(0);
++                    lineWidth = 0;
++                }
++
++                sb.append(ch);
++                lineWidth += w;
++            }
++
++            lines.add(sb.toString());
++            maxLineWidth = Math.max(maxLineWidth, lineWidth);
++        }
++
++        width = maxLineWidth;
++        height = theme.textHeight(title) * lines.size();
++    }
++
+     @Override
+diff --git a/src/main/java/meteordevelopment/meteorclient/mixin/SplashManagerMixin.java b/src/main/java/meteordevelopment/meteorclient/mixin/SplashManagerMixin.java
+index 5b761df..1436d48 100644
+--- a/src/main/java/meteordevelopment/meteorclient/mixin/SplashManagerMixin.java
++++ b/src/main/java/meteordevelopment/meteorclient/mixin/SplashManagerMixin.java
+@@ -40,2 +40,6 @@ public abstract class SplashManagerMixin {
+     private static List<String> getMeteorSplashes() {
++        return meteordevelopment.meteorclient.utils.misc.Splashes.list(originalSplashes());
++    }
++
++    private static List<String> originalSplashes() {
+         return List.of(
+diff --git a/src/main/java/meteordevelopment/meteorclient/renderer/text/Font.java b/src/main/java/meteordevelopment/meteorclient/renderer/text/Font.java
+index 7697eea..52cee1a 100644
+--- a/src/main/java/meteordevelopment/meteorclient/renderer/text/Font.java
++++ b/src/main/java/meteordevelopment/meteorclient/renderer/text/Font.java
+@@ -62,2 +62,36 @@ public class Font {
+         STBTruetype.stbtt_PackFontRanges(packContext, buffer, 0, packRange);
++
++        java.nio.ByteBuffer cjkFont = meteordevelopment.meteorclient.utils.misc.CjkFont.buffer();
++        int[] cjkCps = cjkFont == null ? new int[0] : meteordevelopment.meteorclient.utils.misc.CjkFont.codepoints();
++
++        if (cjkCps.length > 0) {
++            float cjkTarget = height * 1.2f;
++            float cjkPack = Math.min(cjkTarget, 29f);
++            float r = cjkTarget / cjkPack;
++
++            IntBuffer cjkCpBuf = BufferUtils.createIntBuffer(cjkCps.length);
++            cjkCpBuf.put(cjkCps).flip();
++
++            STBTTPackedchar.Buffer cjkData = STBTTPackedchar.create(cjkCps.length);
++            org.lwjgl.stb.STBTTPackRange.Buffer cjkRange = org.lwjgl.stb.STBTTPackRange.create(1);
++            cjkRange.put(org.lwjgl.stb.STBTTPackRange.create().set(cjkPack, 0, cjkCpBuf, cjkCps.length, cjkData, (byte) 2, (byte) 2));
++            cjkRange.flip();
++            STBTruetype.stbtt_PackFontRanges(packContext, cjkFont, 0, cjkRange);
++
++            for (int j = 0; j < cjkCps.length; j++) {
++                STBTTPackedchar p = cjkData.get(j);
++
++                charMap.put(cjkCps[j], new CharData(
++                    p.xoff() * r,
++                    p.yoff() * r,
++                    p.xoff2() * r,
++                    p.yoff2() * r,
++                    p.x0() * (1f / size),
++                    p.y0() * (1f / size),
++                    p.x1() * (1f / size),
++                    p.y1() * (1f / size),
++                    p.xadvance() * r
++                ));
++            }
++        }
+         STBTruetype.stbtt_PackEnd(packContext);
+diff --git a/src/main/java/meteordevelopment/meteorclient/renderer/text/TextRenderer.java b/src/main/java/meteordevelopment/meteorclient/renderer/text/TextRenderer.java
+index fc607e3..0cbe4a6 100644
+--- a/src/main/java/meteordevelopment/meteorclient/renderer/text/TextRenderer.java
++++ b/src/main/java/meteordevelopment/meteorclient/renderer/text/TextRenderer.java
+@@ -14,3 +14,3 @@ public interface TextRenderer {
+     static TextRenderer get() {
+-        return Config.get().customFont.get() ? Fonts.RENDERER : VanillaTextRenderer.INSTANCE;
++        return meteordevelopment.meteorclient.utils.misc.CjkFont.shouldUseCustom(Config.get().customFont.get()) ? Fonts.RENDERER : VanillaTextRenderer.INSTANCE;
+     }
+diff --git a/src/main/java/meteordevelopment/meteorclient/systems/config/Config.java b/src/main/java/meteordevelopment/meteorclient/systems/config/Config.java
+index ba0d7db..73c30cc 100644
+--- a/src/main/java/meteordevelopment/meteorclient/systems/config/Config.java
++++ b/src/main/java/meteordevelopment/meteorclient/systems/config/Config.java
+@@ -73,2 +73,10 @@ public class Config extends System<Config> {
+ 
++    public final Setting<Boolean> customSplashes = sgVisual.add(new BoolSetting.Builder()
++        .name("custom-splashes")
++        .description("Adds the custom splash texts included in this build")
++        .defaultValue(true)
++        .visible(() -> meteordevelopment.meteorclient.utils.misc.Splashes.hasCustom())
++        .build()
++    );
++
+     public final Setting<Boolean> customWindowTitle = sgVisual.add(new BoolSetting.Builder()
+diff --git a/src/main/java/meteordevelopment/meteorclient/utils/Utils.java b/src/main/java/meteordevelopment/meteorclient/utils/Utils.java
+index e555d58..478e887 100644
+--- a/src/main/java/meteordevelopment/meteorclient/utils/Utils.java
++++ b/src/main/java/meteordevelopment/meteorclient/utils/Utils.java
+@@ -349,3 +349,10 @@ public class Utils {
+     public static int searchLevenshteinDefault(String text, String filter, boolean caseSensitive) {
+-        return levenshteinDistance(caseSensitive ? filter : filter.toLowerCase(Locale.ROOT), caseSensitive ? text : text.toLowerCase(Locale.ROOT), 1, 8, 8);
++        int score = levenshteinDistance(caseSensitive ? filter : filter.toLowerCase(Locale.ROOT), caseSensitive ? text : text.toLowerCase(Locale.ROOT), 1, 8, 8);
++
++        String zh = meteordevelopment.meteorclient.utils.misc.Tr.t(text);
++        if (zh != text) {
++            score = Math.min(score, levenshteinDistance(caseSensitive ? filter : filter.toLowerCase(Locale.ROOT), caseSensitive ? zh : zh.toLowerCase(Locale.ROOT), 1, 8, 8));
++        }
++
++        return score;
+     }
+diff --git a/src/main/java/meteordevelopment/meteorclient/utils/misc/CjkFont.java b/src/main/java/meteordevelopment/meteorclient/utils/misc/CjkFont.java
+new file mode 100644
+index 0000000..a69ec6c
+--- /dev/null
++++ b/src/main/java/meteordevelopment/meteorclient/utils/misc/CjkFont.java
+@@ -0,0 +1,72 @@
++/*
++ * This file is part of the Meteor Client distribution (https://github.com/MeteorDevelopment/meteor-client).
++ * Copyright (c) Meteor Development.
++ */
++
++package meteordevelopment.meteorclient.utils.misc;
++
++import org.lwjgl.BufferUtils;
++import org.lwjgl.stb.STBTTFontinfo;
++import org.lwjgl.stb.STBTruetype;
++
++import java.nio.ByteBuffer;
++import java.util.ArrayList;
++import java.util.List;
++import java.util.TreeSet;
++
++public final class CjkFont {
++    private static final String RESOURCE = "/assets/meteor-client/tr/cjk.ttf";
++    private static final String SYMBOLS = "\u2026\u2014\u2013\u00B7\u2022\u00D7\u00F7\u00B0\u00B1\u2264\u2265\u2248\u2190\u2192\u2191\u2193";
++
++    private static ByteBuffer buffer;
++    private static boolean bufferLoaded;
++    private static int[] codepoints;
++
++    private CjkFont() {}
++
++    public static boolean available() {
++        return buffer() != null;
++    }
++
++    public static boolean shouldUseCustom(boolean customFontSetting) {
++        return Tr.enabled() ? available() : customFontSetting;
++    }
++
++    public static synchronized ByteBuffer buffer() {
++        if (!bufferLoaded) {
++            bufferLoaded = true;
++
++            byte[] bytes = Tr.read(RESOURCE);
++            if (bytes != null) {
++                buffer = BufferUtils.createByteBuffer(bytes.length);
++                buffer.put(bytes);
++                buffer.flip();
++            }
++        }
++
++        return buffer;
++    }
++
++    public static synchronized int[] codepoints() {
++        if (codepoints != null) return codepoints;
++
++        ByteBuffer font = buffer();
++        if (font == null) return codepoints = new int[0];
++
++        STBTTFontinfo info = STBTTFontinfo.create();
++        if (!STBTruetype.stbtt_InitFont(info, font)) return codepoints = new int[0];
++
++        TreeSet<Integer> wanted = new TreeSet<>();
++        for (String value : Tr.translations()) value.codePoints().filter(c -> c > 0x7F).forEach(wanted::add);
++        for (int c = 0x3000; c <= 0x303F; c++) wanted.add(c);
++        for (int c = 0xFF01; c <= 0xFF5E; c++) wanted.add(c);
++        for (char c : SYMBOLS.toCharArray()) wanted.add((int) c);
++
++        List<Integer> available = new ArrayList<>();
++        for (int c : wanted) {
++            if (STBTruetype.stbtt_FindGlyphIndex(info, c) != 0) available.add(c);
++        }
++
++        return codepoints = available.stream().mapToInt(Integer::intValue).toArray();
++    }
++}
+diff --git a/src/main/java/meteordevelopment/meteorclient/utils/misc/Splashes.java b/src/main/java/meteordevelopment/meteorclient/utils/misc/Splashes.java
+new file mode 100644
+index 0000000..22e6e1f
+--- /dev/null
++++ b/src/main/java/meteordevelopment/meteorclient/utils/misc/Splashes.java
+@@ -0,0 +1,95 @@
++/*
++ * This file is part of the Meteor Client distribution (https://github.com/MeteorDevelopment/meteor-client).
++ * Copyright (c) Meteor Development.
++ */
++
++package meteordevelopment.meteorclient.utils.misc;
++
++import meteordevelopment.meteorclient.MeteorClient;
++import meteordevelopment.meteorclient.systems.config.Config;
++
++import java.nio.charset.StandardCharsets;
++import java.util.AbstractList;
++import java.util.ArrayList;
++import java.util.List;
++
++public final class Splashes {
++    private static final String BLOCK_RESOURCE = "/assets/meteor-client/tr/splash.txt";
++    private static final String CUSTOM_RESOURCE = "/assets/meteor-client/tr/splash_custom.txt";
++
++    private static List<String> block;
++    private static List<String> custom;
++
++    private Splashes() {}
++
++    public static boolean hasCustom() {
++        load();
++        return !custom.isEmpty();
++    }
++
++    public static List<String> list(List<String> fallback) {
++        return new Pool(fallback);
++    }
++
++    private static boolean customEnabled() {
++        Config config = Config.get();
++        return config != null && config.customSplashes != null && config.customSplashes.get();
++    }
++
++    private static synchronized void load() {
++        if (block != null) return;
++
++        block = lines(BLOCK_RESOURCE);
++        custom = lines(CUSTOM_RESOURCE);
++
++        MeteorClient.LOG.info("Loaded {} block splashes and {} custom splashes", block.size(), custom.size());
++    }
++
++    private static List<String> lines(String resource) {
++        List<String> result = new ArrayList<>();
++
++        byte[] bytes = Tr.read(resource);
++        if (bytes == null) return result;
++
++        for (String line : new String(bytes, StandardCharsets.UTF_8).split("\\R")) {
++            line = line.strip();
++            if (!line.isEmpty() && !line.startsWith("#")) result.add(line);
++        }
++
++        return result;
++    }
++
++    private static final class Pool extends AbstractList<String> {
++        private final List<String> fallback;
++
++        private Pool(List<String> fallback) {
++            this.fallback = fallback;
++        }
++
++        @Override
++        public String get(int index) {
++            return current().get(index);
++        }
++
++        @Override
++        public int size() {
++            return current().size();
++        }
++
++        private List<String> current() {
++            try {
++                if (!Tr.enabled()) return fallback;
++
++                load();
++
++                List<String> pool = new ArrayList<>(block);
++                if (customEnabled()) pool.addAll(custom);
++
++                return pool.isEmpty() ? fallback : pool;
++            } catch (Exception e) {
++                MeteorClient.LOG.error("Failed to build the splash pool", e);
++                return fallback;
++            }
++        }
++    }
++}
+diff --git a/src/main/java/meteordevelopment/meteorclient/utils/misc/Tr.java b/src/main/java/meteordevelopment/meteorclient/utils/misc/Tr.java
+new file mode 100644
+index 0000000..b22ace6
+--- /dev/null
++++ b/src/main/java/meteordevelopment/meteorclient/utils/misc/Tr.java
+@@ -0,0 +1,109 @@
++/*
++ * This file is part of the Meteor Client distribution (https://github.com/MeteorDevelopment/meteor-client).
++ * Copyright (c) Meteor Development.
++ */
++
++package meteordevelopment.meteorclient.utils.misc;
++
++import com.google.gson.JsonElement;
++import com.google.gson.JsonObject;
++import com.google.gson.JsonParser;
++import meteordevelopment.meteorclient.MeteorClient;
++
++import java.io.InputStream;
++import java.io.InputStreamReader;
++import java.nio.charset.StandardCharsets;
++import java.util.Collection;
++import java.util.HashMap;
++import java.util.Map;
++
++public final class Tr {
++    private static final String DICTIONARY = "/assets/meteor-client/tr/zh_tw.json";
++    private static final Map<String, String> TRANSLATIONS = new HashMap<>();
++    private static boolean loaded;
++
++    private Tr() {}
++
++    public static boolean enabled() {
++        String forced = System.getProperty("meteor.zhtw");
++        if (forced != null) return Boolean.parseBoolean(forced);
++
++        if (MeteorClient.mc == null || MeteorClient.mc.options == null) return false;
++
++        String code = MeteorClient.mc.options.languageCode;
++        return "zh_tw".equals(code) || "zh_hk".equals(code);
++    }
++
++    public static String t(String text) {
++        if (text == null || text.isEmpty() || !enabled()) return text;
++        if (!loaded) load();
++
++        String translated = TRANSLATIONS.get(text);
++        return translated != null ? translated : text;
++    }
++
++    public static Object[] args(Object[] args) {
++        if (args == null || !enabled()) return args;
++
++        Object[] translated = args.clone();
++        for (int i = 0; i < translated.length; i++) {
++            if (translated[i] instanceof String text) translated[i] = argument(text);
++        }
++
++        return translated;
++    }
++
++    public static boolean hasCjk(String text) {
++        if (text == null) return false;
++
++        for (int i = 0; i < text.length(); i++) {
++            char c = text.charAt(i);
++            if (c >= 0x2E80 && c <= 0x9FFF || c >= 0xFF00 && c <= 0xFFEF) return true;
++        }
++
++        return false;
++    }
++
++    static Collection<String> translations() {
++        if (!loaded) load();
++        return TRANSLATIONS.values();
++    }
++
++    static byte[] read(String path) {
++        try (InputStream in = Tr.class.getResourceAsStream(path)) {
++            return in == null ? null : in.readAllBytes();
++        } catch (Exception e) {
++            return null;
++        }
++    }
++
++    private static String argument(String text) {
++        int start = 0;
++        while (start + 1 < text.length() && text.charAt(start) == '\u00A7') start += 2;
++
++        String body = text.substring(start);
++        String translated = t(body);
++
++        return translated == body ? text : text.substring(0, start) + translated;
++    }
++
++    private static synchronized void load() {
++        if (loaded) return;
++        loaded = true;
++
++        try (InputStream in = Tr.class.getResourceAsStream(DICTIONARY)) {
++            if (in == null) {
++                MeteorClient.LOG.warn("Missing translation file {}", DICTIONARY);
++                return;
++            }
++
++            JsonObject json = JsonParser.parseReader(new InputStreamReader(in, StandardCharsets.UTF_8)).getAsJsonObject();
++            for (Map.Entry<String, JsonElement> entry : json.entrySet()) {
++                String value = entry.getValue().getAsString();
++                if (!value.isEmpty()) TRANSLATIONS.put(entry.getKey(), value);
++            }
++        } catch (Exception e) {
++            MeteorClient.LOG.error("Failed to load {}", DICTIONARY, e);
++        }
++    }
++}
+diff --git a/src/main/java/meteordevelopment/meteorclient/utils/player/ChatUtils.java b/src/main/java/meteordevelopment/meteorclient/utils/player/ChatUtils.java
+index 9cc2add..146c9e3 100644
+--- a/src/main/java/meteordevelopment/meteorclient/utils/player/ChatUtils.java
++++ b/src/main/java/meteordevelopment/meteorclient/utils/player/ChatUtils.java
+@@ -134,3 +134,3 @@ public class ChatUtils {
+     public static void sendMsg(int id, @Nullable String prefixTitle, @Nullable ChatFormatting prefixColor, ChatFormatting messageColor, String messageContent, Object... args) {
+-        MutableComponent message = formatMsg(String.format(messageContent, args), messageColor);
++        MutableComponent message = formatMsg(String.format(meteordevelopment.meteorclient.utils.misc.Tr.t(messageContent), meteordevelopment.meteorclient.utils.misc.Tr.args(args)), messageColor);
+         sendMsg(id, prefixTitle, prefixColor, message);
+@@ -139,3 +139,3 @@ public class ChatUtils {
+     public static void sendMsg(int id, @Nullable String prefixTitle, @Nullable ChatFormatting prefixColor, String messageContent, ChatFormatting messageColor) {
+-        MutableComponent message = formatMsg(messageContent, messageColor);
++        MutableComponent message = formatMsg(meteordevelopment.meteorclient.utils.misc.Tr.t(messageContent), messageColor);
+         sendMsg(id, prefixTitle, prefixColor, message);

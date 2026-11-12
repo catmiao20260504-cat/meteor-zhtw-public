@@ -1,0 +1,68 @@
+name: Build
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - patches/**
+      - data/**
+      - tools/**
+      - .github/workflows/build.yml
+  schedule:
+    - cron: '0 3 * * 1'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: '26.3', ref: master, java: '25', patch: mojang.patch }
+          - { name: '26.2', ref: 2385f7b4bb9de1a698b4503254bd32f30fd7a87d, java: '25', patch: mojang.patch }
+          - { name: '1.21.11', ref: 1.21.11, java: '21', patch: yarn.patch }
+          - { name: '1.21.10', ref: 1.21.10, java: '21', patch: yarn.patch }
+          - { name: '1.20.1', ref: v0.5.4, java: '17', patch: legacy-1.20.1.patch }
+    env:
+      RESOURCES: meteor/src/main/resources/assets/meteor-client/tr
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Clone Meteor Client
+        run: |
+          git clone --filter=blob:none https://github.com/MeteorDevelopment/meteor-client meteor
+          git -C meteor checkout ${{ matrix.ref }}
+
+      - name: Apply patch
+        run: git -C meteor apply -C1 ../patches/${{ matrix.patch }}
+
+      - name: Copy data
+        run: |
+          mkdir -p $RESOURCES
+          cp data/zh_tw.json data/splash.txt licenses/OFL-NotoSansTC.txt $RESOURCES/
+          if grep -qvE '^[[:space:]]*(#|$)' data/custom_splash.txt; then
+            cp data/custom_splash.txt $RESOURCES/splash_custom.txt
+          fi
+
+      - name: Build font subset
+        run: |
+          pip install fonttools
+          python3 tools/build_cjk_font.py data/zh_tw.json $RESOURCES/cjk.ttf
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java }}
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Build
+        working-directory: meteor
+        run: |
+          chmod +x gradlew
+          ./gradlew build -x test --no-daemon
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: meteor-client-zhtw-${{ matrix.name }}
+          path: meteor/build/libs/*.jar
